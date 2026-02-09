@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>AcousticGuard</title>
+    <!-- Tailwind CSS (CDN) - 手机若无网可能会样式丢失，但这是最轻量的方案 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ['sans-serif'], mono: ['monospace'] },
+            colors: {
+              'ag-bg': '#0f172a', 'ag-card': '#1e293b', 'ag-primary': '#3b82f6',
+              'ag-safe': '#22c55e', 'ag-warn': '#eab308', 'ag-danger': '#ef4444',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+        body { background-color: #0f172a; color: white; user-select: none; -webkit-tap-highlight-color: transparent; overflow: hidden; }
+        /* Safe Area */
+        .safe-top { padding-top: env(safe-area-inset-top, 20px); }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 20px); }
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 2px; }
+        
+        /* Animation Classes */
+        .gauge-circle { transition: stroke-dashoffset 0.1s linear, stroke 0.3s ease; }
+        .gauge-knob { transition: transform 0.1s linear; }
+        .pulse-record { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body class="h-screen flex flex-col font-sans">
+
+    <!-- Header -->
+    <header class="px-4 py-3 flex items-center justify-between border-b border-gray-800 bg-slate-900/90 backdrop-blur safe-top sticky top-0 z-20">
+        <div class="flex items-center space-x-2">
+            <svg class="w-6 h-6 text-ag-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <h1 class="text-lg font-bold tracking-tight">AcousticGuard</h1>
+        </div>
+        <div id="rec-status" class="hidden font-mono text-ag-primary font-bold text-sm pulse-record">REC 00:00</div>
+        <div class="w-10"></div> <!-- Spacer to center title if no buttons -->
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col p-4 space-y-4 overflow-hidden">
+        
+        <!-- Error Message -->
+        <div id="error-msg" class="hidden bg-red-900/50 border border-red-700 text-red-100 p-4 rounded-lg text-sm"></div>
+
+        <!-- Gauge -->
+        <div class="flex-shrink-0 flex flex-col items-center justify-center relative py-2">
+            <div class="bg-slate-800/50 px-3 py-1 rounded-full text-xs text-ag-primary font-medium mb-4 border border-slate-700">Hearing Threshold</div>
+            
+            <div class="relative w-64 h-64 flex items-center justify-center">
+                <!-- Background Ring -->
+                <svg class="absolute w-full h-full transform -rotate-90">
+                    <circle cx="50%" cy="50%" r="80" stroke="#1e293b" stroke-width="20" fill="transparent"/>
+                </svg>
+                <!-- Active Ring -->
+                <svg class="absolute w-full h-full transform -rotate-90 drop-shadow-[0_0_15px_rgba(34,197,94,0.3)]">
+                    <circle id="gauge-path" cx="50%" cy="50%" r="80" stroke="#22c55e" stroke-width="20" fill="transparent" 
+                            stroke-dasharray="502" stroke-dashoffset="502" stroke-linecap="round" class="gauge-circle"/>
+                    <!-- Knob -->
+                    <circle id="gauge-knob" cx="50%" cy="50%" r="8" fill="white" style="transform-origin: center; transform: translate(80px) rotate(0deg);" class="gauge-knob"/>
+                </svg>
+                <!-- Text -->
+                <div class="absolute flex flex-col items-center z-10">
+                    <span id="db-display" class="text-6xl font-bold tracking-tighter text-white drop-shadow-2xl">30</span>
+                    <div class="flex w-32 justify-between px-2 mt-2 text-xs text-gray-500 font-bold uppercase">
+                        <span>Min</span><span>Max</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="w-full flex justify-between items-center px-10 mt-[-20px] z-10">
+                <div class="flex flex-col items-center"><span id="max-val" class="text-2xl font-light">--</span><span class="text-[10px] text-gray-400 font-bold">MAX</span></div>
+                <div class="flex flex-col items-center"><span id="avg-val" class="text-2xl font-light">--</span><span class="text-[10px] text-gray-400 font-bold">AVG</span></div>
+            </div>
+
+            <!-- Gauge Buttons -->
+            <div class="flex w-full justify-between px-4 mt-6">
+                <button onclick="resetApp()" class="flex items-center space-x-2 bg-slate-800 text-gray-300 px-4 py-2 rounded-xl active:scale-95 border border-slate-700 text-sm">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    <span>Reset</span>
+                </button>
+                <button id="btn-save" onclick="saveRecording()" disabled class="flex items-center space-x-2 bg-slate-900 text-gray-600 px-4 py-2 rounded-xl border border-transparent text-sm transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    <span>Save</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Waveform -->
+        <div class="flex-shrink-0">
+             <div class="flex items-center text-xs font-semibold text-gray-400 mb-2">
+               <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+               Spectrum Analysis
+             </div>
+             <div class="w-full h-24 bg-ag-card rounded-xl overflow-hidden shadow-inner border border-gray-700">
+                <canvas id="waveform" class="w-full h-full"></canvas>
+             </div>
+        </div>
+
+        <!-- Event List -->
+        <div class="flex-1 min-h-0 bg-ag-card rounded-xl border border-gray-700 flex flex-col overflow-hidden">
+             <div class="p-3 border-b border-gray-700 bg-slate-800 flex justify-between items-center text-sm">
+                <h3 class="font-bold text-gray-200 flex items-center">
+                    <svg class="w-3 h-3 mr-2 text-ag-warn" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    Events (<span id="event-count">0</span>)
+                </h3>
+             </div>
+             <div id="event-list" class="overflow-y-auto flex-1 p-2 space-y-2 text-center text-gray-500 text-sm py-8">
+                No events detected.
+             </div>
+        </div>
+
+    </main>
+
+    <!-- Footer Controls -->
+    <footer class="p-6 bg-slate-900 border-t border-gray-800 z-30 safe-bottom">
+        <div class="flex items-center justify-center">
+            <button id="btn-toggle" onclick="toggleRecording()" 
+                class="group relative flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-600 shadow-[0_0_25px_rgba(59,130,246,0.6)] active:scale-95 transition-all">
+                <!-- Play Icon -->
+                <svg id="icon-play" class="w-8 h-8 text-white fill-current ml-1" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                <!-- Stop Icon (Hidden) -->
+                <svg id="icon-stop" class="hidden w-8 h-8 text-white fill-current" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+            </button>
+        </div>
+        <div class="flex justify-center mt-6 px-4 text-[10px] text-ag-primary font-medium uppercase tracking-widest">
+             <div class="flex flex-col items-center gap-1"><span>Monitor</span></div>
+        </div>
+    </footer>
+
+    <!-- LOGIC -->
+    <script>
+        // --- CONSTANTS ---
+        const SAMPLE_RATE = 44100;
+        const FFT_SIZE = 2048;
+        const DB_THRESHOLD_WARNING = 50;
+        const DB_THRESHOLD_DANGER = 70;
+        const LOW_FREQ_BOUND = 200;
+
+        // --- STATE ---
+        let isRecording = false;
+        let audioCtx, analyser, source, scriptProcessor;
+        let pcmData = []; // Array of Float32Array
+        let recordingStartTime = 0;
+        let stats = { current: 30, max: 0, min: 100, avg: 0 };
+        let dbSum = 0, dbCount = 0;
+        let events = [];
+        let lastEventTime = 0;
+        let rafId;
+        
+        // --- UI ELEMENTS ---
+        const ui = {
+            btnToggle: document.getElementById('btn-toggle'),
+            iconPlay: document.getElementById('icon-play'),
+            iconStop: document.getElementById('icon-stop'),
+            recStatus: document.getElementById('rec-status'),
+            dbDisplay: document.getElementById('db-display'),
+            maxVal: document.getElementById('max-val'),
+            avgVal: document.getElementById('avg-val'),
+            gaugePath: document.getElementById('gauge-path'),
+            gaugeKnob: document.getElementById('gauge-knob'),
+            canvas: document.getElementById('waveform'),
+            eventList: document.getElementById('event-list'),
+            eventCount: document.getElementById('event-count'),
+            btnSave: document.getElementById('btn-save'),
+            errorMsg: document.getElementById('error-msg')
+        };
+        const ctxCanvas = ui.canvas.getContext('2d');
+
+        // --- AUDIO UTILS ---
+        function calculateDecibels(timeDomainData) {
+            let sumSquares = 0;
+            for (let i = 0; i < timeDomainData.length; i++) {
+                const normalized = (timeDomainData[i] - 128) / 128;
+                sumSquares += normalized * normalized;
+            }
+            const rms = Math.sqrt(sumSquares / timeDomainData.length);
+            if (rms < 0.0001) return 0;
+            return Math.max(0, Math.round(20 * Math.log10(rms) + 100));
+        }
+
+        function analyzeFrequency(frequencyData) {
+            const nyquist = SAMPLE_RATE / 2;
+            const binSize = nyquist / frequencyData.length;
+            let lowFreqEnergy = 0, totalEnergy = 0;
+            const lowFreqLimit = Math.floor(LOW_FREQ_BOUND / binSize);
+            
+            for (let i = 0; i < frequencyData.length; i++) {
+                totalEnergy += frequencyData[i];
+                if (i < lowFreqLimit) lowFreqEnergy += frequencyData[i];
+            }
+            return (totalEnergy > 0 && (lowFreqEnergy / totalEnergy > 0.4)) ? 'Structure/Low' : 'Voice/High';
+        }
+
+        function encodeWAV(samples) {
+            const buffer = new ArrayBuffer(44 + samples.length * 2);
+            const view = new DataView(buffer);
+            const writeString = (view, offset, string) => {
+                for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+            };
+            
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + samples.length * 2, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, SAMPLE_RATE, true);
+            view.setUint32(28, SAMPLE_RATE * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, samples.length * 2, true);
+
+            let offset = 44;
+            for (let i = 0; i < samples.length; i++, offset += 2) {
+                const s = Math.max(-1, Math.min(1, samples[i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        // --- CORE FUNCTIONS ---
+        async function startRecording() {
+            try {
+                ui.errorMsg.classList.add('hidden');
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = FFT_SIZE;
+                analyser.smoothingTimeConstant = 0.8;
+                
+                source = audioCtx.createMediaStreamSource(stream);
+                scriptProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+                
+                source.connect(analyser);
+                source.connect(scriptProcessor);
+                scriptProcessor.connect(audioCtx.destination);
+                
+                pcmData = [];
+                recordingStartTime = Date.now();
+                
+                scriptProcessor.onaudioprocess = (e) => {
+                    const input = e.inputBuffer.getChannelData(0);
+                    pcmData.push(new Float32Array(input));
+                    // Update Time UI
+                    const duration = (Date.now() - recordingStartTime) / 1000;
+                    const mins = Math.floor(duration / 60);
+                    const secs = Math.floor(duration % 60).toString().padStart(2, '0');
+                    ui.recStatus.innerText = `REC ${mins}:${secs}`;
+                    
+                    // Enable save button if we have data
+                    if (pcmData.length > 0) {
+                        ui.btnSave.disabled = false;
+                        ui.btnSave.classList.replace('text-gray-600', 'text-ag-primary');
+                        ui.btnSave.classList.replace('bg-slate-900', 'bg-slate-800');
+                    }
+                };
+
+                setIsRecording(true);
+                drawLoop();
+            } catch (err) {
+                console.error(err);
+                ui.errorMsg.innerText = "Permission Denied: " + err.message;
+                ui.errorMsg.classList.remove('hidden');
+            }
+        }
+
+        function stopRecording() {
+            if (scriptProcessor) scriptProcessor.disconnect();
+            if (source) source.disconnect();
+            if (audioCtx) audioCtx.close();
+            if (rafId) cancelAnimationFrame(rafId);
+            setIsRecording(false);
+        }
+
+        function toggleRecording() {
+            if (isRecording) stopRecording();
+            else startRecording();
+        }
+
+        function setIsRecording(active) {
+            isRecording = active;
+            if (active) {
+                ui.btnToggle.classList.replace('from-cyan-400', 'from-orange-500');
+                ui.btnToggle.classList.replace('to-blue-600', 'to-red-600');
+                ui.btnToggle.classList.replace('shadow-[0_0_25px_rgba(59,130,246,0.6)]', 'shadow-[0_0_25px_rgba(239,68,68,0.6)]');
+                ui.iconPlay.classList.add('hidden');
+                ui.iconStop.classList.remove('hidden');
+                ui.recStatus.classList.remove('hidden');
+            } else {
+                ui.btnToggle.classList.replace('from-orange-500', 'from-cyan-400');
+                ui.btnToggle.classList.replace('to-red-600', 'to-blue-600');
+                ui.btnToggle.classList.replace('shadow-[0_0_25px_rgba(239,68,68,0.6)]', 'shadow-[0_0_25px_rgba(59,130,246,0.6)]');
+                ui.iconPlay.classList.remove('hidden');
+                ui.iconStop.classList.add('hidden');
+                ui.recStatus.classList.add('hidden');
+            }
+        }
+
+        function resetApp() {
+            if (isRecording) stopRecording();
+            stats = { current: 30, max: 0, min: 100, avg: 0 };
+            dbSum = 0; dbCount = 0;
+            events = [];
+            pcmData = [];
+            
+            ui.dbDisplay.innerText = "30";
+            ui.maxVal.innerText = "--";
+            ui.avgVal.innerText = "--";
+            ui.eventList.innerHTML = '<div class="text-center text-gray-500 text-sm py-8">No events detected.</div>';
+            ui.eventCount.innerText = "0";
+            ui.btnSave.disabled = true;
+            ui.btnSave.classList.replace('text-ag-primary', 'text-gray-600');
+            
+            updateGauge(30);
+            
+            // Clear Canvas
+            const w = ui.canvas.width;
+            const h = ui.canvas.height;
+            ctxCanvas.fillStyle = '#1e293b';
+            ctxCanvas.fillRect(0, 0, w, h);
+        }
+
+        function saveRecording() {
+            if (pcmData.length === 0) return;
+            // Flatten array
+            const totalLen = pcmData.reduce((acc, c) => acc + c.length, 0);
+            const merged = new Float32Array(totalLen);
+            let offset = 0;
+            for (const chunk of pcmData) {
+                merged.set(chunk, offset);
+                offset += chunk.length;
+            }
+            
+            const blob = encodeWAV(merged);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `recording-${Date.now()}.wav`;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+        }
+
+        // --- VISUALIZATION LOOP ---
+        function drawLoop() {
+            if (!analyser) return;
+            
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            const timeData = new Uint8Array(bufferLength);
+            
+            analyser.getByteFrequencyData(dataArray);
+            analyser.getByteTimeDomainData(timeData);
+            
+            // 1. Stats Calculation
+            const db = calculateDecibels(timeData);
+            dbSum += db; dbCount++;
+            
+            stats.current = Math.round(stats.current * 0.7 + db * 0.3);
+            stats.max = Math.max(stats.max, db);
+            stats.avg = Math.round(dbSum / dbCount);
+            
+            // 2. UI Updates
+            ui.dbDisplay.innerText = stats.current;
+            ui.maxVal.innerText = stats.max;
+            ui.avgVal.innerText = stats.avg;
+            
+            // Color Logic
+            let color = '#22c55e'; // Safe
+            if (db > DB_THRESHOLD_WARNING) color = '#eab308'; // Warn
+            if (db > DB_THRESHOLD_DANGER) color = '#ef4444'; // Danger
+            
+            ui.dbDisplay.style.color = color;
+            ui.gaugePath.setAttribute('stroke', color);
+            updateGauge(stats.current);
+            
+            // 3. Event Detection
+            if (db > DB_THRESHOLD_WARNING && Date.now() - lastEventTime > 2000) {
+                const type = analyzeFrequency(dataArray);
+                addEvent(db, type);
+                lastEventTime = Date.now();
+            }
+            
+            // 4. Waveform Draw
+            const w = ui.canvas.width = ui.canvas.clientWidth;
+            const h = ui.canvas.height = ui.canvas.clientHeight;
+            ctxCanvas.fillStyle = '#1e293b';
+            ctxCanvas.fillRect(0, 0, w, h);
+            ctxCanvas.lineWidth = 2;
+            ctxCanvas.strokeStyle = color;
+            ctxCanvas.beginPath();
+            
+            const sliceWidth = w / bufferLength;
+            let x = 0;
+            for(let i = 0; i < bufferLength; i++) {
+                const v = timeData[i] / 128.0;
+                const y = v * h / 2;
+                if(i === 0) ctxCanvas.moveTo(x, y);
+                else ctxCanvas.lineTo(x, y);
+                x += sliceWidth;
+            }
+            ctxCanvas.stroke();
+            
+            rafId = requestAnimationFrame(drawLoop);
+        }
+
+        function updateGauge(val) {
+            // Map 0-120dB to Stroke Dash Offset
+            const r = 80;
+            const C = 2 * Math.PI * r; // ~502
+            const pct = Math.min(Math.max(val, 0), 120) / 120;
+            const offset = C - (pct * C);
+            ui.gaugePath.style.strokeDashoffset = offset;
+            ui.gaugeKnob.style.transform = `rotate(${pct * 360}deg) translate(${r}px)`;
+        }
+
+        function addEvent(db, type) {
+            const time = new Date().toLocaleTimeString();
+            const relTime = Math.floor((Date.now() - recordingStartTime) / 1000);
+            const id = Math.random().toString(36).substr(2, 9);
+            
+            events.push({ id, db, type, time, relTime });
+            ui.eventCount.innerText = events.length;
+            
+            if (events.length === 1) ui.eventList.innerHTML = '';
+            
+            const item = document.createElement('div');
+            item.className = "w-full text-left bg-slate-900 p-3 rounded-lg border border-gray-800 mb-2 flex items-center justify-between";
+            item.innerHTML = `
+                <div class="flex items-center space-x-3">
+                    <div class="w-1 h-8 rounded-full ${db > 70 ? 'bg-red-500' : 'bg-yellow-500'}"></div>
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <span class="font-bold text-white">${db} dB</span>
+                            <span class="text-[10px] bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">${type}</span>
+                        </div>
+                        <div class="text-[10px] text-gray-400 mt-0.5">${time} • T+${relTime}s</div>
+                    </div>
+                </div>
+            `;
+            ui.eventList.prepend(item);
+        }
+
+        // Init
+        updateGauge(30);
+    </script>
+</body>
+</html>

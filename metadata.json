@@ -1,0 +1,7 @@
+{
+  "name": "Copy of AcousticGuard",
+  "description": "Smart home sound insulation monitoring and decibel meter. Detects noise levels, identifies structural vibrations, and logs acoustic events.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
